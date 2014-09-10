@@ -20,8 +20,11 @@ import os, sys
 
 PAC_GIT_REPO = os.environ.get("PAC_GIT_REPO")
 
+"""Construct and return package dictionary from current
+system pacman installed state
+"""
 def snapshot():
-    s = subprocess.check_output(["pacman", "-Q"]).decode("utf-8")
+    s = pacman_check_output(False, "-Q").decode("utf-8")
     out = {}
     for line in s.strip().split("\n"):
         tokens = line.split()
@@ -29,6 +32,9 @@ def snapshot():
         out[tokens[0]] = tokens[1];
     return out
 
+"""Construct and return package dictionary from state file
+current working directory of the git repository
+"""
 def deserialize():
     import json
     try:
@@ -37,11 +43,16 @@ def deserialize():
     except FileNotFoundError:
         return {}
 
+"""Serialize package dictionary obj and dump it 
+to the state file in git repository
+"""
 def serialize(obj):
     import json
     with open(os.path.join(PAC_GIT_REPO, 'package_state.json'), 'w') as fp:
         json.dump(obj, fp, indent=2)
+    return 0
 
+"""Get the package dictionary for the given git revision"""
 def get_revision(gitrevno):
     head = git('rev-parse', 'HEAD', check_output=True).strip()
     git('checkout', gitrevno)
@@ -49,7 +60,14 @@ def get_revision(gitrevno):
     git('checkout', head)
     return rv
 
+"""Partition the union of the package dicts prev, curr
 
+Separate into dictionaries for the following categories:
+(a) in curr, not in prev
+(b) in prev, not in curr
+(c) in both, with different versions
+(d) in both, with same versions
+"""
 def get_diff(prev, curr):
     removed = {}
     added = {}
@@ -67,26 +85,57 @@ def get_diff(prev, curr):
             version_changed[key] = {"old": prev.get(key), "new": curr.get(key)}
     return added, removed, version_changed, no_change
 
-def git(*args, check_output=False):
+"""Invoke git in the directory PAC_GIT_REPO with the
+given args, kwargs, using the command specified by cmd
+
+cmd should be one of:
+ subprocess.call
+ subprocess.check_call
+ subprocess.check_output
+
+return the value returned by cmd
+"""
+def _git(cmd, *args, **kwargs):
     cwd = os.getcwd()
     os.chdir(PAC_GIT_REPO)
-    if (check_output):
-        rv = subprocess.check_output(["git"] + list(args))
-        return rv
+    args = ["git"] + list(args)
+    rv = cmd(*args, **kwargs)
+    os.chdir(cwd)
+    return rv
+
+"""Invoke git as a subprocess, return its returncode"""
+def git(*args, **kwargs):
+    return _git(subprocess.call, *args, **kwargs)
+
+"""Invoke git as a subprocess, return stdout, raise
+Exception if non-zero return status"""
+def git_check_output(*args, **kwargs):
+    return _git(subprocess.check_output, *args, **kwargs)
+
+"""Invoke pacman using the command specified
+by cmd, with sudo if sudo is True.
+
+cmd should be one of:
+ subprocess.call
+ subprocess.check_call
+ subprocess.check_output
+
+return the value returned by cmd
+"""
+def _pacman(cmd, sudo, *args, **kwargs):
+    if sudo:
+        args = ["sudo", "pacman"] + list(args)
     else:
-        rv = subprocess.call(["git"] + list(args))
-        os.chdir(cwd)
-        if (rv != 0):
-            exit(rv)
+        args = ["pacman"] + list(args)
 
-def pacman(*args):
-    rv = subprocess.call(["sudo", "pacman"] + list(args))
-    if (rv != 0):
-        exit(rv)
-    serialize(snapshot())
-    git('add', 'package_state.json')
-    git('commit')
+    return cmd(*args, **kwargs)
 
+"""Invoke pacman as a subprocess, return its
+returncode
+"""
+def pacman(sudo, *args, **kwargs):
+    args = [subprocess.call, sudo] + list(args)
+    return _pacman(*args, **kwargs)
 
 if __name__ == '__main__':
 
@@ -98,19 +147,19 @@ if __name__ == '__main__':
     args = docopt(__doc__, options_first=True)
     if args['git']:
         # forward command to git repo
-        git(*args['<gitargs>'])
+        return git(*args['<gitargs>'])
     elif args['man']:
-        pacman(*args['<pacmanargs>'])
+        return pacman(True, *args['<pacmanargs>'])
     elif args['stage']:
         # write to git repo working directory
-        serialize(snapshot())
-        git('status')
+        serialize(snapshot()) 
+        return git('status')
     elif args['commit']:
         # We add and commit the state file
-        git('add', 'package_state.json')
-        git('commit')
+        return git('add', 'package_state.json') and git('commit')
     elif args['apply']:
         # Check for uncommitted changes
+        git("diff-index", "--quiet", "--cached", "HEAD")
         snap = snapshot()
         added, removed, version_changed, no_change = get_diff(deserialize(), snap)
 

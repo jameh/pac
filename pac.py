@@ -60,6 +60,22 @@ def get_revision(gitrevno):
     git('checkout', head)
     return rv
 
+
+def get_pacman_args(prev, curr):
+    installing = {}
+    removing = {}
+    for key in prev.keys():
+        if curr.get(key) is None:
+            # removed package
+            removing[key] = prev.get(key)
+    for key in curr.keys():
+        if prev.get(key) is None or prev.get(key) != curr.get(key):
+            # new package, or change version
+            installing[key] = curr.get(key)
+    return ["-S"] + ["{}={}".format(key, installing[key]) for key in installing.keys()] + \
+        ["-R"] + [key for key in removing.keys()]
+
+
 """Partition the union of the package dicts prev, curr
 
 Separate into dictionaries for the following categories:
@@ -99,7 +115,7 @@ def _git(cmd, *args, **kwargs):
     cwd = os.getcwd()
     os.chdir(PAC_GIT_REPO)
     args = ["git"] + list(args)
-    rv = cmd(*args, **kwargs)
+    rv = cmd(args, **kwargs)
     os.chdir(cwd)
     return rv
 
@@ -128,7 +144,7 @@ def _pacman(cmd, sudo, *args, **kwargs):
     else:
         args = ["pacman"] + list(args)
 
-    return cmd(*args, **kwargs)
+    return cmd(args, **kwargs)
 
 """Invoke pacman as a subprocess, return its
 returncode
@@ -147,33 +163,24 @@ if __name__ == '__main__':
     args = docopt(__doc__, options_first=True)
     if args['git']:
         # forward command to git repo
-        return git(*args['<gitargs>'])
+        rv = git(*args['<gitargs>'])
     elif args['man']:
-        return pacman(True, *args['<pacmanargs>'])
+        # forward command to pacman
+        rv = pacman(False, *args['<pacmanargs>'])
     elif args['stage']:
         # write to git repo working directory
         serialize(snapshot()) 
-        return git('status')
+        rv = git('status')
     elif args['commit']:
         # We add and commit the state file
-        return git('add', 'package_state.json') and git('commit')
+        rv = git('add', 'package_state.json') and git('commit')
     elif args['apply']:
         # Check for uncommitted changes
-        git("diff-index", "--quiet", "--cached", "HEAD")
-        snap = snapshot()
-        added, removed, version_changed, no_change = get_diff(deserialize(), snap)
-
-        if (added != {} or removed != {} or version_changed != {}):
+        if (git("diff-index", "--quiet", "--cached", "HEAD") != 0):
             print("uncommitted changes - not proceeding")
             exit(1)
 
-        added, removed, version_changed, no_change = get_diff(snap, get_revision(args['<gitrevno>']))
-        if (version_changed != {}):
-            # check pacman cache
-            print("we're not time-travellers...yet")
-            exit(1)
-
-        pacman_args = ['-S'] + list(added.keys()) + ['-R'] + list(removed.keys())
-        pacman(*pacman_args)
-
-    exit(0)
+        rv = pacman(True, *get_pacman_args())
+    else:
+        rv = 1
+    exit(rv)

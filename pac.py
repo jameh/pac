@@ -7,16 +7,15 @@ stores state in git, and allows for gitlike
 manipulation of pacman state.
     
 Usage:
-  pac.py git <gitargs>...
-  pac.py man <pacmanargs>...
-  pac.py stage
+  pac.py man [<pacmanargs>...]
   pac.py commit
   pac.py apply <gitrevno>
+  pac.py [-c] <command> [<args>...]
 
 """
 
 import subprocess
-import os, sys
+import os, sys, shutil
 
 PAC_GIT_REPO = os.environ.get("PAC_GIT_REPO")
 
@@ -60,7 +59,13 @@ def get_revision(gitrevno):
     git('checkout', head)
     return rv
 
+"""Find the package names and versions to
+append to the pacman -S command, and those to
+append to the pacman -R command.
 
+Return a list of strings of the form:
+["-S"]
+"""
 def get_pacman_args(prev, curr):
     installing = {}
     removing = {}
@@ -74,32 +79,6 @@ def get_pacman_args(prev, curr):
             installing[key] = curr.get(key)
     return ["-S"] + ["{}={}".format(key, installing[key]) for key in installing.keys()] + \
         ["-R"] + [key for key in removing.keys()]
-
-
-"""Partition the union of the package dicts prev, curr
-
-Separate into dictionaries for the following categories:
-(a) in curr, not in prev
-(b) in prev, not in curr
-(c) in both, with different versions
-(d) in both, with same versions
-"""
-def get_diff(prev, curr):
-    removed = {}
-    added = {}
-    version_changed = {}
-    no_change = {}
-
-    for key in set(prev.keys()).union(set(curr.keys())):
-        if curr.get(key) is None:
-            removed[key] = prev[key]
-        elif prev.get(key) is None:
-            added[key] = curr[key]
-        elif curr.get(key) == prev.get(key):
-            no_change[key] = prev[key]
-        else:
-            version_changed[key] = {"old": prev.get(key), "new": curr.get(key)}
-    return added, removed, version_changed, no_change
 
 """Invoke git in the directory PAC_GIT_REPO with the
 given args, kwargs, using the command specified by cmd
@@ -153,34 +132,47 @@ def pacman(sudo, *args, **kwargs):
     args = [subprocess.call, sudo] + list(args)
     return _pacman(*args, **kwargs)
 
+def pacman_check_output(sudo, *args, **kwargs):
+    args = [subprocess.check_output, sudo] + list(args)
+    return _pacman(*args, **kwargs)
+
+def _call(args, cmd=subprocess.call):
+    if (shutil.which(args[0])):
+        rv = cmd(args)
+    else:
+        print("command {} not found".format(args[0]))
+        rv = 1
+    return rv
+
 if __name__ == '__main__':
 
     if PAC_GIT_REPO is None:
         print("Please set environment variable PAC_GIT_REPO")
         exit(1)
 
-    from docopt import docopt
-    args = docopt(__doc__, options_first=True)
-    if args['git']:
-        # forward command to git repo
-        rv = git(*args['<gitargs>'])
-    elif args['man']:
-        # forward command to pacman
-        rv = pacman(False, *args['<pacmanargs>'])
-    elif args['stage']:
-        # write to git repo working directory
-        serialize(snapshot()) 
-        rv = git('status')
-    elif args['commit']:
+    # execute commands in git repo
+    os.chdir(PAC_GIT_REPO)
+
+    if (len(sys.argv) == 1 or sys.argv[1] in ['--help', '-help', 'help']):
+        print(__doc__, end="")
+        rv = 1
+    elif sys.argv[1] == 'commit':
+        serialize(snapshot())
         # We add and commit the state file
-        rv = git('add', 'package_state.json') and git('commit')
-    elif args['apply']:
+        rv = git('add', 'package_state.json') or git('commit')
+    elif sys.argv[1] == 'apply':
         # Check for uncommitted changes
         if (git("diff-index", "--quiet", "--cached", "HEAD") != 0):
             print("uncommitted changes - not proceeding")
             exit(1)
-
         rv = pacman(True, *get_pacman_args())
+    elif sys.argv[1] == 'man':
+        # syntax sugar for pacman
+        rv = _call(["pacman"] + sys.argv[2:])
+    elif sys.argv[1] == '-c':
+        # accessibility for 'man' command
+        rv = _call(sys.argv[2:])
     else:
-        rv = 1
+        rv = _call(sys.argv[1:])
+
     exit(rv)

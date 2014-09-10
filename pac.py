@@ -8,6 +8,7 @@ manipulation of pacman state.
     
 Usage:
   pac.py man [<pacmanargs>...]
+  pac.py add
   pac.py commit
   pac.py apply <gitrevno>
   pac.py [-c] <command> [<args>...]
@@ -156,10 +157,11 @@ if __name__ == '__main__':
     if (len(sys.argv) == 1 or sys.argv[1] in ['--help', '-help', 'help']):
         print(__doc__, end="")
         rv = 1
-    elif sys.argv[1] == 'commit':
+    elif sys.argv[1] == 'add':
         serialize(snapshot())
-        # We add and commit the state file
-        rv = git('add', 'package_state.json') or git('commit')
+        rv = git('add', 'package_state.json')
+    elif sys.argv[1] == 'commit':
+        rv = git('commit')
     elif sys.argv[1] == 'apply':
         # Check for uncommitted changes
         if (git("diff-index", "--quiet", "--cached", "HEAD") != 0):

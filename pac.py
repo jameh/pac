@@ -19,6 +19,23 @@ import subprocess
 import os, sys, shutil
 
 PAC_GIT_REPO = os.environ.get("PAC_GIT_REPO")
+if PAC_GIT_REPO is None:
+    for loc in os.curdir, os.path.expanduser("~/.config/pac"), "/etc/pac", os.environ.get("PAC_CONF"):
+        if loc is not None and os.path.isfile(os.path.join(loc, "pac.conf")):
+            with open(os.path.join(loc,"pac.conf")) as f:
+                for line in f:
+                    s = line.strip().split("=")
+                    if s[0] == "PAC_GIT_REPO" and len(s) >= 2:
+                        PAC_GIT_REPO = s[1]
+        if PAC_GIT_REPO is not None:
+            break
+
+if PAC_GIT_REPO is None:
+    print("Please define PAC_GIT_REPO")
+    exit(1)
+
+if os.path.exists(PAC_GIT_REPO) == False:
+    os.mkdir(PAC_GIT_REPO)
 
 """Construct and return package dictionary from current
 system pacman installed state
@@ -39,9 +56,10 @@ def deserialize():
     import json
     try:
         with open(os.path.join(PAC_GIT_REPO, 'package_state.json'), 'r') as fp:
-            return json.load(fp)
+            s = json.load(fp)
     except FileNotFoundError:
         return {}
+    return s
 
 """Serialize package dictionary obj and dump it 
 to the state file in git repository
@@ -54,15 +72,16 @@ def serialize(obj):
 
 """Get the package dictionary for the given git revision"""
 def get_revision(gitrevno):
-    if git("symbolic-ref", "HEAD") == 128:
+    if git("symbolic-ref", "HEAD", stdout=subprocess.DEVNULL) == 128:
         # get 'current' commit hash
-        head = git_check_output("rev-parse", "--symbolic-full-name", "--abbrev-ref", "HEAD")
+        head = git_check_output("rev-parse", "HEAD").strip()
     else:
         # attached head, get current branch
-        head = git_check_output("rev-parse", "HEAD")
-    git('checkout', gitrevno)
+        head = git_check_output("rev-parse", "--symbolic-full-name", "--abbrev-ref", "HEAD").strip()
+
+    git_check_call('checkout', gitrevno, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     rv = deserialize()
-    git('checkout', head)
+    git_check_call('checkout', head, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return rv
 
 """Find the package names and versions to
@@ -83,7 +102,11 @@ def get_pacman_args(prev, curr):
     for key in curr.keys():
         if prev.get(key) is None or prev.get(key) != curr.get(key):
             # new package, or change version
-            installing[key] = curr.get(key)
+            if curr[key]["explicit"]:
+                installing_explicit[key] = curr.get(key)
+            else:
+                installing_implicit[key] = curr.get(key)
+            
     return installing_explicit, installing_implicit, removing
 
 """Invoke git in the directory PAC_GIT_REPO with the
@@ -97,12 +120,8 @@ cmd should be one of:
 return the value returned by cmd
 """
 def _git(cmd, *args, **kwargs):
-    cwd = os.getcwd()
-    os.chdir(PAC_GIT_REPO)
     args = ["git"] + list(args)
-    rv = cmd(args, **kwargs)
-    os.chdir(cwd)
-    return rv
+    return cmd(args, **kwargs)
 
 """Invoke git as a subprocess, return its returncode"""
 def git(*args, **kwargs):
@@ -112,6 +131,11 @@ def git(*args, **kwargs):
 Exception if non-zero return status"""
 def git_check_output(*args, **kwargs):
     return _git(subprocess.check_output, *args, **kwargs)
+
+"""Invoke git as a subprocess, return return code, raise
+Exception if non-zero return status"""
+def git_check_call(*args, **kwargs):
+    return _git(subprocess.check_call, *args, **kwargs)
 
 """Invoke pacman using the command specified
 by cmd, with sudo if sudo is True.
@@ -152,10 +176,6 @@ def _call(args, cmd=subprocess.call):
 
 if __name__ == '__main__':
 
-    if PAC_GIT_REPO is None:
-        print("Please set environment variable PAC_GIT_REPO")
-        exit(1)
-
     # execute commands in git repo
     os.chdir(PAC_GIT_REPO)
 
@@ -166,16 +186,16 @@ if __name__ == '__main__':
         serialize(snapshot())
         rv = git('add', 'package_state.json')
     elif sys.argv[1] == 'commit':
-        rv = git('commit')
+        rv = git(*sys.argv[1:])
     elif sys.argv[1] == 'apply':
         # Check for uncommitted changes
         if (git("diff-index", "--quiet", "--cached", "HEAD") != 0):
             print("uncommitted changes - not proceeding")
             exit(1)
-        if len(sys.argv) <= 3:
+        if len(sys.argv) <= 2:
             new_packages = deserialize()
         else:
-            new_packages = get_revision(revision)
+            new_packages = get_revision(sys.argv[2])
 
         installing_explicit, installing_implicit, removing = get_pacman_args(snapshot(), new_packages)
 
@@ -198,10 +218,10 @@ if __name__ == '__main__':
             if removing != []:
                 print(" ".join(cmdline_remove))
 
-            if (raw_input("Continue? Y/n")):
-                rv = _call(cmdline_explicit) or \
-                     _call(cmdline_implicit) or \
-                     _call(cmdline_remove)
+            if (input("Continue? Y/n") in ['y', 'Y', '']):
+                rv = (installing_explicit != [] and _call(cmdline_explicit)) or \
+                     (installing_implicit != [] and _call(cmdline_implicit)) or \
+                     (removing != [] and _call(cmdline_remove))
             else:
                 rv = 1
     elif sys.argv[1] == 'man':

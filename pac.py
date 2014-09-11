@@ -24,12 +24,12 @@ PAC_GIT_REPO = os.environ.get("PAC_GIT_REPO")
 system pacman installed state
 """
 def snapshot():
-    s = pacman_check_output(False, "-Q").decode("utf-8")
+    packages = pacman_check_output(False, "-Q").decode("utf-8").strip().split("\n")
+    explicit = pacman_check_output(False, "-Qe").decode("utf-8").strip().split("\n")
     out = {}
-    for line in s.strip().split("\n"):
-        tokens = line.split()
-        # package name: package version
-        out[tokens[0]] = tokens[1];
+    for line in packages:
+        name, version = line.split()
+        out[name] = {"version": version, "explicit": (name in explicit)};
     return out
 
 """Construct and return package dictionary from state file
@@ -54,7 +54,12 @@ def serialize(obj):
 
 """Get the package dictionary for the given git revision"""
 def get_revision(gitrevno):
-    head = git('rev-parse', 'HEAD', check_output=True).strip()
+    if git("symbolic-ref", "HEAD") == 128:
+        # get 'current' commit hash
+        head = git_check_output("rev-parse", "--symbolic-full-name", "--abbrev-ref", "HEAD")
+    else:
+        # attached head, get current branch
+        head = git_check_output("rev-parse", "HEAD")
     git('checkout', gitrevno)
     rv = deserialize()
     git('checkout', head)
@@ -64,11 +69,12 @@ def get_revision(gitrevno):
 append to the pacman -S command, and those to
 append to the pacman -R command.
 
-Return a list of strings of the form:
-["-S"]
+Return a three-tuple of:
+(to install explicitly, to install as deps, to remove)
 """
 def get_pacman_args(prev, curr):
-    installing = {}
+    installing_explicit = {}
+    installing_implicit = {}
     removing = {}
     for key in prev.keys():
         if curr.get(key) is None:
@@ -78,8 +84,7 @@ def get_pacman_args(prev, curr):
         if prev.get(key) is None or prev.get(key) != curr.get(key):
             # new package, or change version
             installing[key] = curr.get(key)
-    return ["-S"] + ["{}={}".format(key, installing[key]) for key in installing.keys()] + \
-        ["-R"] + [key for key in removing.keys()]
+    return installing_explicit, installing_implicit, removing
 
 """Invoke git in the directory PAC_GIT_REPO with the
 given args, kwargs, using the command specified by cmd
@@ -167,7 +172,38 @@ if __name__ == '__main__':
         if (git("diff-index", "--quiet", "--cached", "HEAD") != 0):
             print("uncommitted changes - not proceeding")
             exit(1)
-        rv = pacman(True, *get_pacman_args())
+        if len(sys.argv) <= 3:
+            new_packages = deserialize()
+        else:
+            new_packages = get_revision(revision)
+
+        installing_explicit, installing_implicit, removing = get_pacman_args(snapshot(), new_packages)
+
+        installing_explicit = ["{}={}".format(key, installing_explicit[key]["version"]) for key in installing_explicit.keys()]
+        installing_implicit = ["{}={}".format(key, installing_implicit[key]["version"]) for key in installing_implicit.keys()]
+        removing = list(removing.keys())
+
+        if installing_explicit == [] and installing_implicit == [] and removing == []:
+            print("no changes in packages detected")
+            rv = 0
+        else:
+            cmdline_explicit = ["pacman", "-Sd", "--asexplicit"] + installing_explicit
+            cmdline_implicit = ["pacman", "-Sd", "--asdeps"] + installing_implicit
+            cmdline_remove = ["pacman", "-Rd"] + removing
+
+            if installing_explicit != []:
+                print(" ".join(cmdline_explicit))
+            if installing_implicit != []:
+                print(" ".join(cmdline_implicit))
+            if removing != []:
+                print(" ".join(cmdline_remove))
+
+            if (raw_input("Continue? Y/n")):
+                rv = _call(cmdline_explicit) or \
+                     _call(cmdline_implicit) or \
+                     _call(cmdline_remove)
+            else:
+                rv = 1
     elif sys.argv[1] == 'man':
         # syntax sugar for pacman
         rv = _call(["pacman"] + sys.argv[2:])

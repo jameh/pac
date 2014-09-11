@@ -46,7 +46,7 @@ def snapshot():
     out = {}
     for line in packages:
         name, version = line.split()
-        out[name] = {"version": version, "explicit": (name in explicit)};
+        out[name] = {"version": version, "explicit": ("{} {}".format(name, version) in explicit)};
     return out
 
 """Construct and return package dictionary from state file

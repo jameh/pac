@@ -88,21 +88,25 @@ $ sudo pac man -R slim
 ...
 $ pac add
 $ pac commit -m 'Got rid of slim'
-[master 681d535] Got rid of slim
- 1 file changed, 2794 insertions(+), 2798 deletions(-)
- rewrite package_state.json (67%)
+[master a276098] Got rid of slim
+ 1 file changed, 1553 insertions(+), 1557 deletions(-)
 $ sudo pac apply HEAD~1
-pacman -Rd slim
-Continue? Y/n
-checking dependencies...
+pacman -Sd --asexplicit slim=1.3.6-5
+Continue? Y/n 
+resolving dependencies...
+looking for inter-conflicts...
 
 Packages (1): slim-1.3.6-5
 
-Total Removed Size:   0.44 MiB
+Total Installed Size:   0.44 MiB
 
-:: Do you want to remove these packages? [Y/n]
-(1/1) removing slim                                          [################################] 100%
-
+:: Proceed with installation? [Y/n] 
+(1/1) checking keys in keyring                               [################################] 100%
+(1/1) checking package integrity                             [################################] 100%
+(1/1) loading package files                                  [################################] 100%
+(1/1) checking for file conflicts                            [################################] 100%
+(1/1) checking available disk space                          [################################] 100%
+(1/1) installing slim                                        [################################] 100%
 ```
 
 

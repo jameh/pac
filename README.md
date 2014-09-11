@@ -9,7 +9,10 @@ Currently, only Python 3 is supported. You also need git and pacman installed to
 ## Installation
 
 ```
-$ mkdir -p /home/jamie/.config/pac/git_repo
+$ mkdir -p ~/code
+$ cd ~/code
+$ git clone https://github.com/jameh/pac.git
+$ mkdir -p ~/.config/pac/git_repo
 # mkdir -p /etc/pac/git_repo
 # echo "PAC_GIT_REPO=/home/jamie/.config/pac/git_repo" > /etc/pac/pac.conf
 # ln -s /home/jamie/code/pac/pac.py /usr/local/bin/pac

@@ -225,8 +225,11 @@ if __name__ == '__main__':
             else:
                 rv = 1
     elif sys.argv[1] == 'man':
-        # syntax sugar for pacman
+        # syntax sugar for pacman + commit
         rv = _call(["pacman"] + sys.argv[2:])
+        serialize(snapshot())
+        rv = git('add', 'package_state.json')
+        rv = git('commit')
     elif sys.argv[1] == '-c':
         # accessibility for 'man' command
         rv = _call(sys.argv[2:])

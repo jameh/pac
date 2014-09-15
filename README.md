@@ -25,9 +25,9 @@ The following are equivalent:
 
 ```
 pac man -Syu # syntax sugar
-pac pacman -Syu
-pac -c pacman -Syu
-(cd $PAC_GIT_REPO; pacman -Syu)
+(pac pacman -Syu; git add package_list.json; git commit)
+(pac -c pacman -Syu; cd $PAC_GIT_REPO; git add package_list.json; git commit)
+(cd $PAC_GIT_REPO; pacman -Syu; git add package_list.json; git commit)
 ```
 
 You can also perform any other commands in your PATH:
